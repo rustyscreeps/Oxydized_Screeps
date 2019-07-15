@@ -1,0 +1,13 @@
+[package]
+name = "oxidized_screeps"
+version = "0.0.0"
+authors = ["Adam Salvail <ausprit@gmail.com>"]
+edition = "2018"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4"
+serde = {version = "1", features = ["derive"]}
+erased-serde = "0.3"
