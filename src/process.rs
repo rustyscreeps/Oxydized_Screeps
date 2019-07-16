@@ -25,6 +25,8 @@ pub trait Process: erased_serde::Serialize {
     fn kill(&mut self) {}
 
     fn type_string(&self) -> String;
+
+    fn to_bytes(&self) -> Vec<u8>;
 }
 
 serialize_trait_object!(Process);
@@ -54,28 +56,66 @@ pub enum PSignalResult {
     None, // Do nothing.
 }
 
-pub enum JoinResult {
-
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug)]
+#[serde(untagged)]
 #[serde(from = "Vec<u8>")]
 pub enum MaybeSerializedProcess {
     Ser(Vec<u8>),
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     De(Box<dyn Process>),
 }
 
 impl MaybeSerializedProcess {
-    #[allow(clippy::borrowed_box)]
-    pub fn deserialized_process(&mut self, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) -> &mut Box<dyn Process> {
+
+    // Still unclear whether you'd ever want to go from De to Ser
+
+    // pub fn serialize(&mut self) {
+    //     match self {
+    //         MaybeSerializedProcess::Ser(_) => (),
+    //         MaybeSerializedProcess::De(obj) => {
+    //             let bytes = obj.to_bytes();
+    //             *self = MaybeSerializedProcess::Ser(bytes);
+    //         },
+    //     };
+    // }
+    //
+    // pub fn serialized_bytes(&mut self) -> &Vec<u8> {
+    //     match self {
+    //         MaybeSerializedProcess::Ser(bytes) => bytes,
+    //         MaybeSerializedProcess::De(obj) => {
+    //             obj.to_bytes()
+    //         },
+    //     }
+    // }
+
+    pub fn deserialize(&mut self, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>){
         match self {
             MaybeSerializedProcess::Ser(bytes) => {
                 let process = deserializer(bytes);
                 *self = MaybeSerializedProcess::De(process);
-                self.deserialized_process(deserializer)
             },
+            MaybeSerializedProcess::De(_) => (),
+        }
+    }
+
+    #[allow(clippy::borrowed_box)]
+    pub fn deserialized_process(&mut self, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) -> &mut Box<dyn Process> {
+        self.deserialize(deserializer);
+        match self {
             MaybeSerializedProcess::De(process) => process,
+            _ => panic!("Deserialization of a process failed!")
+        }
+    }
+}
+
+impl serde::Serialize for MaybeSerializedProcess {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            MaybeSerializedProcess::Ser(vec) => vec.serialize(serializer),
+            MaybeSerializedProcess::De(obj) => obj.to_bytes().serialize(serializer)
         }
     }
 }
@@ -86,17 +126,17 @@ impl From<Vec<u8>> for MaybeSerializedProcess {
     }
 }
 
+impl From<MaybeSerializedProcess> for Vec<u8> {
+    fn from(v: MaybeSerializedProcess) -> Self {
+        match v {
+            MaybeSerializedProcess::Ser(vec) => vec,
+            MaybeSerializedProcess::De(obj) => obj.to_bytes(),
+        }
+    }
+}
+
 impl fmt::Debug for Box<dyn Process> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Process {{ type: {} }}", self.type_string())
     }
 }
-
-// impl<'de> serde::Deserialize<'de> for Box<dyn Process> {
-//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-//     where
-//         D: serde::Deserializer<'de> {
-//             // Figure out how to capture users' types.
-//             Err(serde::de::Error::custom("Figure out how to implement this!"))
-//     }
-// }
