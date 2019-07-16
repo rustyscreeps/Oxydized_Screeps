@@ -2,16 +2,26 @@
 //!
 //!
 
+
+// /////////////
+// todo:
+// /////////////
+// - Remove most of the `pub`
+// - Better killing of processes.
+
+
+
+
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use log::{error};
 use serde::{Serialize, Deserialize};
 
-use crate::process::{Message, Process, ProcessResult, ReturnValue, MaybeSerializedProcess};
+use crate::process::{Message, Process, PResult, PSignalResult, ReturnValue, MaybeSerializedProcess};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Kernel {
-    // Try and refactor those to using Vec<Option<u32>> instead
     process_table: BTreeMap<u32, ProcessInfo>,
     next_pid_number: u32,
     scheduler: Scheduler,
@@ -34,41 +44,78 @@ impl Kernel {
         k
     }
 
-    pub fn run_next(&mut self, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) -> bool {  // todo: have better return value?
-        match self.scheduler.next() {
-            Some(Task {ty, pid}) => {
-                if let Some(mut pinfo) = self.process_table.remove(&pid) {  // todo: gather mutations
-                    let process = pinfo.process.deserialized_process(deserializer);
-                    if let Some(presult) = match ty {
-                        TaskType::Start => process.start(),
-                        TaskType::Run => process.run(),
-                        TaskType::Join(result) => process.join(result),
-                        TaskType::ReceiveMessage(msg) => process.receive(msg),
-                    } {
-                        self.process_result(presult, &mut pinfo, deserializer);
-                    }
-                    self.process_table.insert(pid, pinfo);
-                }
-                true
+    pub fn run_next(&mut self, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) -> () {  // todo: have better return value?
+        if let Some(Task {ty, pid}) = self.scheduler.next() {
+            // Grab ownership of the process and it's metadata
+            if let Some(mut pinfo) = self.process_table.remove(&pid) {  // todo: gather mutations
+                let process = pinfo.process.deserialized_process(deserializer);
+
+                match ty {
+                    TaskType::Start => {
+                        let pr = process.start();
+                        self.process_result(pr, pinfo, deserializer);
+                    },
+                    TaskType::Run => {
+                        let pr = process.run();
+                        self.process_result(pr, pinfo, deserializer);
+                    },
+                    TaskType::Join(result) => {
+                        let pr = process.join(result);
+                        self.process_signal_result(pr, pinfo, deserializer);
+                    },
+                    TaskType::ReceiveMessage(msg) => {
+                        let pr = process.receive(msg);
+                        self.process_signal_result(pr, pinfo, deserializer);
+                    },
+                };
             }
-            None => false
         }
     }
 
-    fn process_result(&mut self, proc_res: ProcessResult, pinfo: &mut ProcessInfo, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
+    fn process_result(&mut self, proc_res: PResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
         match proc_res {
-            ProcessResult::Done(rv) => self.done(pinfo, rv, deserializer),
-            ProcessResult::Yield => self.scheduler.schedule(pinfo.pid, TaskType::Run),
-            ProcessResult::Sleep(duration) =>{
-                let proc_to_wake = self.wake_list.entry(self.current_tick + duration).or_default();
-                proc_to_wake.push(pinfo.pid);
+            PResult::Done(rv) => {
+                self.join_parent(&pinfo, rv);
+                self.terminate(pinfo, deserializer);
             },
-            ProcessResult::Fork(procs, proc_result) => {
-                self.fork(procs, pinfo);
+            PResult::Yield => self.scheduler.reschedule(pinfo.pid),
+            PResult::Sleep(duration) => {
+                let procs_to_wake = self.wake_list.entry(self.current_tick + duration).or_default();
+                procs_to_wake.push(pinfo.pid);
+                self.process_table.insert(pinfo.pid, pinfo);
+            },
+            PResult::Wait => {
+                self.process_table.insert(pinfo.pid, pinfo);
+            },
+            PResult::Fork(procs, proc_result) => {
+                self.fork(procs, &mut pinfo);
                 self.process_result(*proc_result, pinfo, deserializer);
             },
-            ProcessResult::Error(s) => error!{"Proc {}: {} -- {}", pinfo.pid, pinfo.process_type, s}
-        }
+            PResult::Error(s) => {
+                error!{"Proc {}: {} -- {}\n     Killing process...", pinfo.pid, pinfo.process_type, s}
+                self.terminate(pinfo, deserializer);
+            },
+        };
+    }
+
+    fn process_signal_result(&mut self, proc_res: PSignalResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
+        match proc_res {
+            PSignalResult::None => {
+                self.process_table.insert(pinfo.pid, pinfo);
+            },
+            PSignalResult::Done(rv) => {
+                self.join_parent(&pinfo, rv);
+                self.terminate(pinfo, deserializer);
+            },
+            PSignalResult::Fork(procs, proc_result) => {
+                self.fork(procs, &mut pinfo);
+                self.process_signal_result(*proc_result, pinfo, deserializer);
+            },
+            PSignalResult::Error(s) => {
+                error!{"Proc {}: {} -- {}\n     Killing process...", pinfo.pid, pinfo.process_type, s}
+                self.terminate(pinfo, deserializer);
+            },
+        };
     }
 
     fn fork(&mut self, new_procs: Vec<Box<dyn Process>>, pinfo: &mut ProcessInfo) {
@@ -77,19 +124,21 @@ impl Kernel {
         }
     }
 
-    fn done(&mut self, pinfo: &ProcessInfo, rv: ReturnValue, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
+    fn join_parent(&mut self, pinfo: &ProcessInfo, rv: ReturnValue) {
         self.scheduler.join_process(pinfo.parent_pid, rv);
         if let Some(parent) = self.process_table.get_mut(&pinfo.parent_pid) {
             parent.children_processes.remove(&pinfo.pid);
         }
+    }
 
+    fn terminate(&mut self, mut pinfo: ProcessInfo, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
         for cpid in pinfo.children_processes.iter() {
-            if let Some(mut pinfo) = self.process_table.remove(cpid) {
+            if let Some(cpinfo) = self.process_table.remove(cpid) {
                 let process = pinfo.process.deserialized_process(deserializer);
                 process.kill();
+                self.terminate(cpinfo, deserializer);
             }
         }
-
     }
 
     pub fn launch_process(&mut self, proc: Box<dyn Process>, parent_pid: u32) -> u32 {
@@ -157,7 +206,8 @@ impl Scheduler {
         Self::default()
     }
 
-    pub fn schedule(&mut self, pid: u32, ty: TaskType) {
+    fn schedule(&mut self, pid: u32, ty: TaskType) {
+        // Todo: Might want to check whether the process has already been scheduled?
         self.task_queue.push_back(Task { ty, pid });
     }
 
@@ -168,6 +218,10 @@ impl Scheduler {
 
     pub fn launch_process(&mut self, pid: u32) {
         self.schedule(pid, TaskType::Start);
+    }
+
+    pub fn reschedule(&mut self, pid: u32) {
+        self.schedule(pid, TaskType::Run);
     }
 
     pub fn join_process(&mut self, parent_pid: u32, result: ReturnValue){

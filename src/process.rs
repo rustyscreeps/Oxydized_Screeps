@@ -8,15 +8,21 @@ use erased_serde::{self, serialize_trait_object, __internal_serialize_trait_obje
 use serde;
 
 pub trait Process: erased_serde::Serialize {
-    fn start(&mut self) -> Option<ProcessResult>;
+    fn start(&mut self) -> PResult {
+        PResult::Yield
+    }
 
-    fn run(&mut self) -> Option<ProcessResult>;
+    fn run(&mut self) -> PResult;
 
-    fn join(&mut self, return_value: ReturnValue) -> Option<ProcessResult>;
+    fn join(&mut self, return_value: ReturnValue) -> PSignalResult{
+        PSignalResult::None
+    }
 
-    fn kill(&mut self);
+    fn receive(&mut self, msg: Message) -> PSignalResult {
+        PSignalResult::None
+    }
 
-    fn receive(&mut self, msg: Message) -> Option<ProcessResult>;
+    fn kill(&mut self) {}
 
     fn type_string(&self) -> String;
 }
@@ -32,12 +38,24 @@ pub struct ReturnValue {
     pub value: String,
 }
 
-pub enum ProcessResult {
+pub enum PResult {
     Done(ReturnValue),
     Yield,
     Sleep(u32),
-    Fork(Vec<Box<dyn Process>>, Box<ProcessResult>),
+    Wait,
+    Fork(Vec<Box<dyn Process>>, Box<Self>),
     Error(String),
+}
+
+pub enum PSignalResult {
+    Done(ReturnValue), // Short-circuit the `run` method
+    Fork(Vec<Box<dyn Process>>, Box<Self>),
+    Error(String),
+    None, // Do nothing.
+}
+
+pub enum JoinResult {
+
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
