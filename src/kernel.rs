@@ -3,12 +3,11 @@
 //!
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fmt;
 
 use log::{error};
-use serde::{Serialize, Deserialize, Deserializer};
+use serde::{Serialize, Deserialize};
 
-use crate::process::{Message, Process, ProcessResult, ReturnValue};
+use crate::process::{Message, Process, ProcessResult, ReturnValue, MaybeSerializedProcess};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Kernel {
@@ -35,17 +34,18 @@ impl Kernel {
         k
     }
 
-    pub fn run_next(&mut self) -> bool {  // todo: have better return value?
+    pub fn run_next(&mut self, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) -> bool {  // todo: have better return value?
         match self.scheduler.next() {
             Some(Task {ty, pid}) => {
                 if let Some(mut pinfo) = self.process_table.remove(&pid) {  // todo: gather mutations
+                    let process = pinfo.process.deserialized_process(deserializer);
                     if let Some(presult) = match ty {
-                        TaskType::Start => pinfo.process.start(),
-                        TaskType::Run => pinfo.process.run(),
-                        TaskType::Join(result) => pinfo.process.join(result),
-                        TaskType::ReceiveMessage(msg) => pinfo.process.receive(msg),
+                        TaskType::Start => process.start(),
+                        TaskType::Run => process.run(),
+                        TaskType::Join(result) => process.join(result),
+                        TaskType::ReceiveMessage(msg) => process.receive(msg),
                     } {
-                        self.process_result(presult, &mut pinfo);
+                        self.process_result(presult, &mut pinfo, deserializer);
                     }
                     self.process_table.insert(pid, pinfo);
                 }
@@ -55,9 +55,9 @@ impl Kernel {
         }
     }
 
-    fn process_result(&mut self, proc_res: ProcessResult, pinfo: &mut ProcessInfo) {
+    fn process_result(&mut self, proc_res: ProcessResult, pinfo: &mut ProcessInfo, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
         match proc_res {
-            ProcessResult::Done(rv) => self.done(pinfo, rv),
+            ProcessResult::Done(rv) => self.done(pinfo, rv, deserializer),
             ProcessResult::Yield => self.scheduler.schedule(pinfo.pid, TaskType::Run),
             ProcessResult::Sleep(duration) =>{
                 let proc_to_wake = self.wake_list.entry(self.current_tick + duration).or_default();
@@ -65,7 +65,7 @@ impl Kernel {
             },
             ProcessResult::Fork(procs, proc_result) => {
                 self.fork(procs, pinfo);
-                self.process_result(*proc_result, pinfo);
+                self.process_result(*proc_result, pinfo, deserializer);
             },
             ProcessResult::Error(s) => error!{"Proc {}: {} -- {}", pinfo.pid, pinfo.process_type, s}
         }
@@ -77,7 +77,7 @@ impl Kernel {
         }
     }
 
-    fn done(&mut self, pinfo: &ProcessInfo, rv: ReturnValue) {
+    fn done(&mut self, pinfo: &ProcessInfo, rv: ReturnValue, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
         self.scheduler.join_process(pinfo.parent_pid, rv);
         if let Some(parent) = self.process_table.get_mut(&pinfo.parent_pid) {
             parent.children_processes.remove(&pinfo.pid);
@@ -85,14 +85,19 @@ impl Kernel {
 
         for cpid in pinfo.children_processes.iter() {
             if let Some(mut pinfo) = self.process_table.remove(cpid) {
-                pinfo.process.kill();
+                let process = pinfo.process.deserialized_process(deserializer);
+                process.kill();
             }
         }
 
     }
 
     pub fn launch_process(&mut self, proc: Box<dyn Process>, parent_pid: u32) -> u32 {
-        let pinfo = ProcessInfo::new(self.next_pid_number, parent_pid, proc);
+        let pinfo = ProcessInfo::new(
+            self.next_pid_number,
+            parent_pid,
+            proc.type_string(),
+            MaybeSerializedProcess::De(proc));
         self.process_table.insert(self.next_pid_number, pinfo);     // todo:  Make this more robust.
         self.scheduler.schedule(self.next_pid_number, TaskType::Start);
 
@@ -107,33 +112,18 @@ pub struct ProcessInfo {
     parent_pid: u32,
     children_processes: BTreeSet<u32>,
     process_type: String,
-    process: Box<dyn Process>,  // replace this with an enum MaybeSerializedProcess
+    process: MaybeSerializedProcess,  // replace this with an enum MaybeSerializedProcess
 }
 
 impl ProcessInfo {
-    fn new(pid: u32, parent_pid:u32, process: Box<dyn Process>) -> Self {
+    fn new(pid: u32, parent_pid:u32, type_str: String, process: MaybeSerializedProcess) -> Self {
         ProcessInfo {
             pid,
             parent_pid,
             children_processes: BTreeSet::new(),
-            process_type: process.type_string(),
+            process_type: type_str.to_owned(),
             process,
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for Box<dyn Process> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de> {
-            // Figure out how to capture users' types.
-            Err(serde::de::Error::custom("Figure out how to implement this!"))
-    }
-}
-
-impl fmt::Debug for Box<dyn Process> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Process {{ type: {} }}", self.type_string())
     }
 }
 
@@ -150,7 +140,13 @@ pub enum TaskType {
     ReceiveMessage(Message),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+impl Default for TaskType {
+    fn default() -> Self {
+        TaskType::Start
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Task {
     ty: TaskType,
     pid: u32,
