@@ -4,10 +4,11 @@
 
 use std::fmt;
 
-use erased_serde::{self, serialize_trait_object, __internal_serialize_trait_object};
-use serde;
+// use erased_serde::{self, serialize_trait_object, __internal_serialize_trait_object};
+// use serde;
+use serde::{Serialize, Deserialize, Serializer};
 
-pub trait Process: erased_serde::Serialize {
+pub trait Process {
     fn start(&mut self) -> PResult {
         PResult::Yield
     }
@@ -29,15 +30,22 @@ pub trait Process: erased_serde::Serialize {
     fn to_bytes(&self) -> Vec<u8>;
 }
 
-serialize_trait_object!(Process);
+// serialize_trait_object!(Process);
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Message ();
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ReturnValue {
-    pub pid: u32,
     pub value: String,
+}
+
+impl ReturnValue {
+    pub fn new(value: &str) -> Self {
+        ReturnValue {
+            value: value.to_owned()
+        }
+    }
 }
 
 pub enum PResult {
@@ -56,7 +64,7 @@ pub enum PSignalResult {
     None, // Do nothing.
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(untagged)]
 #[serde(from = "Vec<u8>")]
 pub enum MaybeSerializedProcess {
@@ -108,10 +116,10 @@ impl MaybeSerializedProcess {
     }
 }
 
-impl serde::Serialize for MaybeSerializedProcess {
+impl Serialize for MaybeSerializedProcess {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer,
+        S: Serializer,
     {
         match self {
             MaybeSerializedProcess::Ser(vec) => vec.serialize(serializer),

@@ -11,3 +11,6 @@ publish = false
 log = "0.4"
 serde = {version = "1", features = ["derive"]}
 erased-serde = "0.3"
+
+[dev-dependencies]
+bincode = "1.1"
