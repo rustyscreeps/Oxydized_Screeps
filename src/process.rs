@@ -6,7 +6,7 @@ use std::fmt;
 
 // use erased_serde::{self, serialize_trait_object, __internal_serialize_trait_object};
 // use serde;
-use serde::{Serialize, Deserialize, Serializer};
+use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 pub trait Process {
     fn start(&mut self) -> PResult {
@@ -15,17 +15,19 @@ pub trait Process {
 
     fn run(&mut self) -> PResult;
 
+    #[allow(unused_variables)]
     fn join(&mut self, return_value: ReturnValue) -> PSignalResult{
         PSignalResult::None
     }
 
+    #[allow(unused_variables)]
     fn receive(&mut self, msg: Message) -> PSignalResult {
         PSignalResult::None
     }
 
     fn kill(&mut self) {}
 
-    fn type_string(&self) -> String;
+    fn type_id(&self) -> u32;
 
     fn to_bytes(&self) -> Vec<u8>;
 }
@@ -64,12 +66,15 @@ pub enum PSignalResult {
     None, // Do nothing.
 }
 
-#[derive(Deserialize, Debug)]
-#[serde(untagged)]
-#[serde(from = "Vec<u8>")]
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SerializedProcess {
+    type_id: u32,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug)]
 pub enum MaybeSerializedProcess {
-    Ser(Vec<u8>),
-    #[serde(skip)]
+    Ser(SerializedProcess),
     De(Box<dyn Process>),
 }
 
@@ -96,10 +101,10 @@ impl MaybeSerializedProcess {
     //     }
     // }
 
-    pub fn deserialize(&mut self, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>){
+    pub fn deserialize(&mut self, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>){
         match self {
-            MaybeSerializedProcess::Ser(bytes) => {
-                let process = deserializer(bytes);
+            MaybeSerializedProcess::Ser(sp) => {
+                let process = deserializer(sp.type_id, &sp.bytes);
                 *self = MaybeSerializedProcess::De(process);
             },
             MaybeSerializedProcess::De(_) => (),
@@ -107,7 +112,7 @@ impl MaybeSerializedProcess {
     }
 
     #[allow(clippy::borrowed_box)]
-    pub fn deserialized_process(&mut self, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) -> &mut Box<dyn Process> {
+    pub fn deserialized_process(&mut self, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) -> &mut Box<dyn Process> {
         self.deserialize(deserializer);
         match self {
             MaybeSerializedProcess::De(process) => process,
@@ -122,29 +127,43 @@ impl Serialize for MaybeSerializedProcess {
         S: Serializer,
     {
         match self {
-            MaybeSerializedProcess::Ser(vec) => vec.serialize(serializer),
-            MaybeSerializedProcess::De(obj) => obj.to_bytes().serialize(serializer)
+            MaybeSerializedProcess::Ser(sp) => sp.serialize(serializer),
+            MaybeSerializedProcess::De(obj) => {
+                SerializedProcess {
+                    type_id: obj.type_id(),
+                    bytes: obj.to_bytes(),
+                }.serialize(serializer)
+            }
         }
     }
 }
 
-impl From<Vec<u8>> for MaybeSerializedProcess {
-    fn from(v: Vec<u8>) -> Self {
-        MaybeSerializedProcess::Ser(v)
+impl<'de> Deserialize<'de> for MaybeSerializedProcess {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de> {
+        SerializedProcess::deserialize(deserializer)
+            .map(|sp| MaybeSerializedProcess::Ser(sp))
     }
 }
 
-impl From<MaybeSerializedProcess> for Vec<u8> {
-    fn from(v: MaybeSerializedProcess) -> Self {
-        match v {
-            MaybeSerializedProcess::Ser(vec) => vec,
-            MaybeSerializedProcess::De(obj) => obj.to_bytes(),
-        }
-    }
-}
+// impl From<Vec<u8>> for MaybeSerializedProcess {
+//     fn from(v: Vec<u8>) -> Self {
+//         MaybeSerializedProcess::Ser(v)
+//     }
+// }
+
+// impl From<MaybeSerializedProcess> for Vec<u8> {
+//     fn from(v: MaybeSerializedProcess) -> Self {
+//         match v {
+//             MaybeSerializedProcess::Ser(vec) => vec,
+//             MaybeSerializedProcess::De(obj) => obj.to_bytes(),
+//         }
+//     }
+// }
 
 impl fmt::Debug for Box<dyn Process> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Process {{ type: {} }}", self.type_string())
+        write!(f, "Process {{ type: {} }}", self.type_id())
     }
 }

@@ -36,8 +36,8 @@ impl Process for ParentProcess {
 
     fn kill(&mut self) {}
 
-    fn type_string(&self) -> String {
-        "Parent".to_owned()
+    fn type_id(&self) -> u32 {
+        1
     }
 
     fn to_bytes(&self) -> Vec<u8> {
@@ -72,8 +72,8 @@ struct ChildProcess {
 
     fn kill(&mut self) {}
 
-    fn type_string(&self) -> String {
-        "Child".to_owned()
+    fn type_id(&self) -> u32 {
+        2
     }
 
     fn to_bytes(&self) -> Vec<u8> {

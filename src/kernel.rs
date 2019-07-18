@@ -30,21 +30,17 @@ pub struct Kernel {
 }
 
 impl Kernel {
-    pub fn new(init_proc: Box<dyn Process>, current_tick: u32) -> Self {
-        let mut k = Kernel{
+    pub fn new(current_tick: u32) -> Self {
+        Kernel{
             process_table: BTreeMap::default(),
             next_pid_number: 0,
             scheduler: Scheduler::new(),
             current_tick,
             wake_list: BTreeMap::default(),
-        };
-
-        k.launch_process(init_proc, 0);
-
-        k
+        }
     }
 
-    pub fn run_next(&mut self, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) -> () {  // todo: have better return value?
+    pub fn run_next(&mut self, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) -> bool {
         if let Some(Task {ty, pid}) = self.scheduler.next() {
             // Grab ownership of the process and it's metadata
             if let Some(mut pinfo) = self.process_table.remove(&pid) {  // todo: gather mutations
@@ -69,10 +65,13 @@ impl Kernel {
                     },
                 };
             }
+            true
+        } else {
+            false
         }
     }
 
-    fn process_result(&mut self, proc_res: PResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
+    fn process_result(&mut self, proc_res: PResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) {
         match proc_res {
             PResult::Done(rv) => {
                 self.join_parent(&pinfo, rv);
@@ -92,13 +91,13 @@ impl Kernel {
                 self.process_result(*proc_result, pinfo, deserializer);
             },
             PResult::Error(s) => {
-                error!{"Proc {}: {} -- {}\n     Killing process...", pinfo.pid, pinfo.process_type, s}
+                error!{"Proc {}: {} -- {}\n     Killing process...", pinfo.pid, pinfo.process_id, s}
                 self.terminate(pinfo, deserializer);
             },
         };
     }
 
-    fn process_signal_result(&mut self, proc_res: PSignalResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
+    fn process_signal_result(&mut self, proc_res: PSignalResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) {
         match proc_res {
             PSignalResult::None => {
                 self.process_table.insert(pinfo.pid, pinfo);
@@ -112,7 +111,7 @@ impl Kernel {
                 self.process_signal_result(*proc_result, pinfo, deserializer);
             },
             PSignalResult::Error(s) => {
-                error!{"Proc {}: {} -- {}\n     Killing process...", pinfo.pid, pinfo.process_type, s}
+                error!{"Proc {}: {} -- {}\n     Killing process...", pinfo.pid, pinfo.process_id, s}
                 self.terminate(pinfo, deserializer);
             },
         };
@@ -131,7 +130,7 @@ impl Kernel {
         }
     }
 
-    fn terminate(&mut self, mut pinfo: ProcessInfo, deserializer: &impl Fn(&Vec<u8>) -> Box<dyn Process>) {
+    fn terminate(&mut self, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) {
         for cpid in pinfo.children_processes.iter() {
             if let Some(cpinfo) = self.process_table.remove(cpid) {
                 let process = pinfo.process.deserialized_process(deserializer);
@@ -145,7 +144,7 @@ impl Kernel {
         let pinfo = ProcessInfo::new(
             self.next_pid_number,
             parent_pid,
-            proc.type_string(),
+            proc.type_id(),
             MaybeSerializedProcess::De(proc));
         self.process_table.insert(self.next_pid_number, pinfo);     // todo:  Make this more robust.
         self.scheduler.schedule(self.next_pid_number, TaskType::Start);
@@ -160,17 +159,17 @@ pub struct ProcessInfo {
     pid: u32,
     parent_pid: u32,
     children_processes: BTreeSet<u32>,
-    process_type: String,
-    process: MaybeSerializedProcess,  // replace this with an enum MaybeSerializedProcess
+    process_id: u32,
+    process: MaybeSerializedProcess,
 }
 
 impl ProcessInfo {
-    fn new(pid: u32, parent_pid:u32, type_str: String, process: MaybeSerializedProcess) -> Self {
+    fn new(pid: u32, parent_pid:u32, type_id: u32, process: MaybeSerializedProcess) -> Self {
         ProcessInfo {
             pid,
             parent_pid,
             children_processes: BTreeSet::new(),
-            process_type: type_str.to_owned(),
+            process_id: type_id,
             process,
         }
     }
