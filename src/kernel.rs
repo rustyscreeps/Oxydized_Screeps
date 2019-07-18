@@ -45,7 +45,6 @@ impl Kernel {
             // Grab ownership of the process and it's metadata
             if let Some(mut pinfo) = self.process_table.remove(&pid) {  // todo: gather mutations
                 let process = pinfo.process.deserialized_process(deserializer);
-
                 match ty {
                     TaskType::Start => {
                         let pr = process.start();
@@ -69,6 +68,23 @@ impl Kernel {
         } else {
             false
         }
+    }
+
+    pub fn launch_process(&mut self, proc: Box<dyn Process>, parent_pid: Option<u32>) -> u32 {
+        let pinfo = ProcessInfo::new(
+            self.next_pid_number,
+            parent_pid,
+            proc.type_id(),
+            MaybeSerializedProcess::De(proc));
+        self.process_table.insert(self.next_pid_number, pinfo);     // todo:  Make this more robust.
+        self.scheduler.schedule(self.next_pid_number, TaskType::Start);
+
+        self.next_pid_number += 1;
+        self.next_pid_number - 1
+    }
+
+    pub fn next_tick(&mut self) {
+        self.current_tick += 1;
     }
 
     fn process_result(&mut self, proc_res: PResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) {
@@ -119,14 +135,16 @@ impl Kernel {
 
     fn fork(&mut self, new_procs: Vec<Box<dyn Process>>, pinfo: &mut ProcessInfo) {
         for p in new_procs {
-            pinfo.children_processes.insert(self.launch_process(p, pinfo.pid));
+            pinfo.children_processes.insert(self.launch_process(p, Some(pinfo.pid)));
         }
     }
 
     fn join_parent(&mut self, pinfo: &ProcessInfo, rv: ReturnValue) {
-        self.scheduler.join_process(pinfo.parent_pid, rv);
-        if let Some(parent) = self.process_table.get_mut(&pinfo.parent_pid) {
-            parent.children_processes.remove(&pinfo.pid);
+        if let Some(parent_pid) = pinfo.parent_pid {
+            if let Some(parent) = self.process_table.get_mut(&parent_pid) {
+                self.scheduler.join_process(parent_pid, rv);
+                parent.children_processes.remove(&pinfo.pid);
+            }
         }
     }
 
@@ -139,32 +157,19 @@ impl Kernel {
             }
         }
     }
-
-    pub fn launch_process(&mut self, proc: Box<dyn Process>, parent_pid: u32) -> u32 {
-        let pinfo = ProcessInfo::new(
-            self.next_pid_number,
-            parent_pid,
-            proc.type_id(),
-            MaybeSerializedProcess::De(proc));
-        self.process_table.insert(self.next_pid_number, pinfo);     // todo:  Make this more robust.
-        self.scheduler.schedule(self.next_pid_number, TaskType::Start);
-
-        self.next_pid_number += 1;
-        self.next_pid_number - 1
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProcessInfo {
     pid: u32,
-    parent_pid: u32,
+    parent_pid: Option<u32>,
     children_processes: BTreeSet<u32>,
     process_id: u32,
     process: MaybeSerializedProcess,
 }
 
 impl ProcessInfo {
-    fn new(pid: u32, parent_pid:u32, type_id: u32, process: MaybeSerializedProcess) -> Self {
+    fn new(pid: u32, parent_pid: Option<u32>, type_id: u32, process: MaybeSerializedProcess) -> Self {
         ProcessInfo {
             pid,
             parent_pid,
@@ -205,11 +210,6 @@ impl Scheduler {
         Self::default()
     }
 
-    fn schedule(&mut self, pid: u32, ty: TaskType) {
-        // Todo: Might want to check whether the process has already been scheduled?
-        self.task_queue.push_back(Task { ty, pid });
-    }
-
     #[allow(clippy::should_implement_trait)]  // Implement iter?
     pub fn next(&mut self) -> Option<Task> {
         self.task_queue.pop_front()
@@ -229,5 +229,10 @@ impl Scheduler {
 
     pub fn send_message(&mut self, receiver_pid: u32, msg: Message) {
         self.schedule(receiver_pid, TaskType::ReceiveMessage(msg))
+    }
+
+    fn schedule(&mut self, pid: u32, ty: TaskType) {
+        // Todo: Might want to check whether the process has already been scheduled?
+        self.task_queue.push_back(Task { ty, pid });
     }
 }

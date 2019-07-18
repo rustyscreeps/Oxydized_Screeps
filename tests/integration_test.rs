@@ -52,12 +52,17 @@ impl ParentProcess {
             s: false,
         }
     }
+
+    fn from_bytes(bytes: &Vec<u8>) -> Self {
+        bincode::deserialize(bytes).unwrap()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ChildProcess {
     w: String,
     s: bool,
+    n_run: u32,
 }
 
     impl Process for ChildProcess {
@@ -67,6 +72,7 @@ struct ChildProcess {
     }
 
     fn run(&mut self) -> PResult {
+        self.n_run += 1;
         PResult::Done(ReturnValue::new(&self.w))
     }
 
@@ -86,14 +92,50 @@ impl ChildProcess {
         ChildProcess {
             w: "World".to_owned(),
             s: false,
+            n_run: 0,
         }
+    }
+
+    fn from_bytes(bytes: &Vec<u8>) -> Self {
+        bincode::deserialize(bytes).unwrap()
+    }
+}
+
+fn deserialize_process(type_id: u32, bytes: &Vec<u8>) -> Box<dyn Process> {
+    match type_id {
+        1 => Box::new(ParentProcess::from_bytes(bytes)),
+        2 => Box::new(ChildProcess::from_bytes(bytes)),
+        _ => panic!("bad process number"),
     }
 }
 
 
+#[test]
+fn empty_kernel() {
+    let mut ker = Kernel::new(10);
 
+    for _ in 0..10 {
+        ker.run_next(&deserialize_process);
+    }
+
+    let s = bincode::serialize(&ker).unwrap();
+    let mut de_ker: Kernel = bincode::deserialize(&s).unwrap();
+
+    de_ker.next_tick();
+}
 
 #[test]
-fn schedule_a_process() {
-    assert_eq!(2 + 2, 4);
+fn lauch_single_process() {
+    let mut ker = Kernel::new(10);
+
+    ker.launch_process(Box::new(ChildProcess::new()), None);
+
+    for _ in 0..10 {
+        ker.run_next(&deserialize_process);
+    }
+
+    let s = bincode::serialize(&ker).unwrap();
+    let mut de_ker: Kernel = bincode::deserialize(&s).unwrap();
+
+    de_ker.next_tick();
 }
