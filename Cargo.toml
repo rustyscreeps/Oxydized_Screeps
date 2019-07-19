@@ -1,5 +1,5 @@
 [package]
-name = "oxidized_screeps"
+name = "oxydized_screeps"
 version = "0.1.0"
 authors = ["Adam Salvail <ausprit@gmail.com>"]
 edition = "2018"
