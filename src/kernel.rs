@@ -40,7 +40,7 @@ impl Kernel {
         }
     }
 
-    pub fn run_next(&mut self, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) -> bool {
+    pub fn run_next(&mut self, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) -> bool {
         if let Some(Task {ty, pid}) = self.scheduler.next() {
             // Grab ownership of the process and it's metadata
             if let Some(mut pinfo) = self.process_table.remove(&pid) {  // todo: gather mutations
@@ -85,9 +85,16 @@ impl Kernel {
 
     pub fn next_tick(&mut self) {
         self.current_tick += 1;
+
+        // Wake processes
+        if let Some(procs_to_wake) = self.wake_list.remove(&self.current_tick) {
+            for pid in procs_to_wake.iter() {
+                self.scheduler.reschedule(pid.clone());
+            }
+        }
     }
 
-    fn process_result(&mut self, proc_res: PResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) {
+    fn process_result(&mut self, proc_res: PResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) {
         match proc_res {
             PResult::Done(rv) => {
                 self.join_parent(&pinfo, rv);
@@ -113,7 +120,7 @@ impl Kernel {
         };
     }
 
-    fn process_signal_result(&mut self, proc_res: PSignalResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) {
+    fn process_signal_result(&mut self, proc_res: PSignalResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) {
         match proc_res {
             PSignalResult::None => {
                 self.process_table.insert(pinfo.pid, pinfo);
@@ -148,7 +155,7 @@ impl Kernel {
         }
     }
 
-    fn terminate(&mut self, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) {
+    fn terminate(&mut self, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) {
         for cpid in pinfo.children_processes.iter() {
             if let Some(cpinfo) = self.process_table.remove(cpid) {
                 let process = pinfo.process.deserialized_process(deserializer);

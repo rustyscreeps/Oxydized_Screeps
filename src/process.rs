@@ -101,7 +101,7 @@ impl MaybeSerializedProcess {
     //     }
     // }
 
-    pub fn deserialize(&mut self, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>){
+    pub fn deserialize(&mut self, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>){
         match self {
             MaybeSerializedProcess::Ser(sp) => {
                 let process = deserializer(sp.type_id, &sp.bytes);
@@ -112,7 +112,7 @@ impl MaybeSerializedProcess {
     }
 
     #[allow(clippy::borrowed_box)]
-    pub fn deserialized_process(&mut self, deserializer: &impl Fn(u32, &Vec<u8>) -> Box<dyn Process>) -> &mut Box<dyn Process> {
+    pub fn deserialized_process(&mut self, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) -> &mut Box<dyn Process> {
         self.deserialize(deserializer);
         match self {
             MaybeSerializedProcess::De(process) => process,

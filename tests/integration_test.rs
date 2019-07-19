@@ -23,18 +23,13 @@ impl Process for ParentProcess {
     }
 
     fn join(&mut self, return_value: ReturnValue) -> PSignalResult{
+        let ReturnValue{ value } = return_value;
         if self.s {
-            PSignalResult::Done(ReturnValue::new(&self.h))
+            PSignalResult::Done(ReturnValue::new(&format!("{}{}", self.h, value)))
         } else {
             PSignalResult::None
         }
     }
-
-    fn receive(&mut self, msg: Message) -> PSignalResult {
-        PSignalResult::None
-    }
-
-    fn kill(&mut self) {}
 
     fn type_id(&self) -> u32 {
         1
@@ -53,7 +48,7 @@ impl ParentProcess {
         }
     }
 
-    fn from_bytes(bytes: &Vec<u8>) -> Self {
+    fn from_bytes(bytes: &[u8]) -> Self {
         bincode::deserialize(bytes).unwrap()
     }
 }
@@ -76,8 +71,6 @@ struct ChildProcess {
         PResult::Done(ReturnValue::new(&self.w))
     }
 
-    fn kill(&mut self) {}
-
     fn type_id(&self) -> u32 {
         2
     }
@@ -96,12 +89,12 @@ impl ChildProcess {
         }
     }
 
-    fn from_bytes(bytes: &Vec<u8>) -> Self {
+    fn from_bytes(bytes: &[u8]) -> Self {
         bincode::deserialize(bytes).unwrap()
     }
 }
 
-fn deserialize_process(type_id: u32, bytes: &Vec<u8>) -> Box<dyn Process> {
+fn deserialize_process(type_id: u32, bytes: &[u8]) -> Box<dyn Process> {
     match type_id {
         1 => Box::new(ParentProcess::from_bytes(bytes)),
         2 => Box::new(ChildProcess::from_bytes(bytes)),
@@ -138,4 +131,18 @@ fn lauch_single_process() {
     let mut de_ker: Kernel = bincode::deserialize(&s).unwrap();
 
     de_ker.next_tick();
+}
+
+#[test]
+fn lauch_child_process() {
+    let mut ker = Kernel::new(10);
+    ker.launch_process(Box::new(ParentProcess::new()), None);
+
+    for _ in 0..10 {
+        while ker.run_next(&deserialize_process) {}
+
+        let s = bincode::serialize(&ker).unwrap();
+        ker = bincode::deserialize(&s).unwrap();
+        ker.next_tick()
+    }
 }
