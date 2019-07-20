@@ -53,8 +53,10 @@ impl ReturnValue {
 }
 
 pub enum PResult {
+    // Todo: Maybe add a way to track state (u8) which could be matched on as entry points
     Done(ReturnValue),
     Yield,
+    YieldTick,
     Sleep(u32),
     Wait,
     Fork(Vec<BoxedProcess>, Box<Self>),

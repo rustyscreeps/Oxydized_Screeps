@@ -88,10 +88,13 @@ impl Kernel {
 
         // Wake processes
         if let Some(procs_to_wake) = self.wake_list.remove(&self.current_tick) {
-            for pid in procs_to_wake.iter() {
-                self.scheduler.reschedule(pid.clone());
+            for pid in procs_to_wake.into_iter() {
+                self.scheduler.reschedule(pid);
             }
         }
+
+        // Then add recurrent tasks
+        self.scheduler.next_tick();
     }
 
     pub fn tick(&self) -> u32 {
@@ -105,6 +108,7 @@ impl Kernel {
                 self.terminate(pinfo, deserializer);
             },
             PResult::Yield => self.scheduler.reschedule(pinfo.pid),
+            PResult::YieldTick => self.scheduler.schedule_next_tick(pinfo.pid),
             PResult::Sleep(duration) => {
                 let procs_to_wake = self.wake_list.entry(self.current_tick + duration).or_default();
                 procs_to_wake.push(pinfo.pid);
@@ -191,11 +195,6 @@ impl ProcessInfo {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
-pub struct Scheduler {
-    task_queue: VecDeque<Task>,
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TaskType {
     Start,
@@ -216,6 +215,12 @@ pub struct Task {
     pid: u32,
 }
 
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct Scheduler {
+    task_queue: VecDeque<Task>,
+    next_tick_tasks: VecDeque<Task>,
+}
+
 impl Scheduler {
     pub fn new() -> Self {
         Self::default()
@@ -234,12 +239,20 @@ impl Scheduler {
         self.schedule(pid, TaskType::Run);
     }
 
+    pub fn schedule_next_tick(&mut self, pid: u32) {
+        self.next_tick_tasks.push_back( Task { ty: TaskType::Run, pid});
+    }
+
     pub fn join_process(&mut self, parent_pid: u32, result: ReturnValue){
         self.schedule(parent_pid, TaskType::Join(result));
     }
 
     pub fn send_message(&mut self, receiver_pid: u32, msg: Message) {
         self.schedule(receiver_pid, TaskType::ReceiveMessage(msg))
+    }
+
+    pub fn next_tick(&mut self) {
+        self.task_queue.append(&mut self.next_tick_tasks);
     }
 
     fn schedule(&mut self, pid: u32, ty: TaskType) {
