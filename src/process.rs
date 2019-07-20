@@ -147,7 +147,7 @@ impl<'de> Deserialize<'de> for MaybeSerializedProcess {
     where
         D: Deserializer<'de> {
         SerializedProcess::deserialize(deserializer)
-            .map(|sp| MaybeSerializedProcess::Ser(sp))
+            .map(MaybeSerializedProcess::Ser)
     }
 }
 

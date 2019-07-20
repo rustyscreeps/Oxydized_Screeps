@@ -107,8 +107,14 @@ impl Kernel {
                 self.join_parent(&pinfo, rv);
                 self.terminate(pinfo, deserializer);
             },
-            PResult::Yield => self.scheduler.reschedule(pinfo.pid),
-            PResult::YieldTick => self.scheduler.schedule_next_tick(pinfo.pid),
+            PResult::Yield => {
+                self.scheduler.reschedule(pinfo.pid);
+                self.process_table.insert(pinfo.pid, pinfo);
+            },
+            PResult::YieldTick => {
+                self.scheduler.schedule_next_tick(pinfo.pid);
+                self.process_table.insert(pinfo.pid, pinfo);
+            },
             PResult::Sleep(duration) => {
                 let procs_to_wake = self.wake_list.entry(self.current_tick + duration).or_default();
                 procs_to_wake.push(pinfo.pid);
