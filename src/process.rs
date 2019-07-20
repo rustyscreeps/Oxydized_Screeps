@@ -8,6 +8,8 @@ use std::fmt;
 // use serde;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
+pub type BoxedProcess = Box<dyn Process + Sync + Send>;
+
 pub trait Process {
     fn start(&mut self) -> PResult {
         PResult::Yield
@@ -55,13 +57,13 @@ pub enum PResult {
     Yield,
     Sleep(u32),
     Wait,
-    Fork(Vec<Box<dyn Process>>, Box<Self>),
+    Fork(Vec<BoxedProcess>, Box<Self>),
     Error(String),
 }
 
 pub enum PSignalResult {
     Done(ReturnValue), // Short-circuit the `run` method
-    Fork(Vec<Box<dyn Process>>, Box<Self>),
+    Fork(Vec<BoxedProcess>, Box<Self>),
     Error(String),
     None, // Do nothing.
 }
@@ -75,7 +77,7 @@ pub struct SerializedProcess {
 #[derive(Debug)]
 pub enum MaybeSerializedProcess {
     Ser(SerializedProcess),
-    De(Box<dyn Process>),
+    De(BoxedProcess),
 }
 
 impl MaybeSerializedProcess {
@@ -101,7 +103,7 @@ impl MaybeSerializedProcess {
     //     }
     // }
 
-    pub fn deserialize(&mut self, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>){
+    pub fn deserialize(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess){
         match self {
             MaybeSerializedProcess::Ser(sp) => {
                 let process = deserializer(sp.type_id, &sp.bytes);
@@ -112,7 +114,7 @@ impl MaybeSerializedProcess {
     }
 
     #[allow(clippy::borrowed_box)]
-    pub fn deserialized_process(&mut self, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) -> &mut Box<dyn Process> {
+    pub fn deserialized_process(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) -> &mut BoxedProcess {
         self.deserialize(deserializer);
         match self {
             MaybeSerializedProcess::De(process) => process,
@@ -162,7 +164,7 @@ impl<'de> Deserialize<'de> for MaybeSerializedProcess {
 //     }
 // }
 
-impl fmt::Debug for Box<dyn Process> {
+impl fmt::Debug for BoxedProcess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Process {{ type: {} }}", self.type_id())
     }

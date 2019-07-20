@@ -3,7 +3,7 @@ pub mod process;
 
 pub use crate::{
     kernel::{Kernel},
-    process::{Process, PResult, PSignalResult, ReturnValue, Message},
+    process::{Process, PResult, PSignalResult, ReturnValue, Message, BoxedProcess},
 };
 
 

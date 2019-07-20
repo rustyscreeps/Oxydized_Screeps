@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use log::{error};
 use serde::{Serialize, Deserialize};
 
-use crate::process::{Message, Process, PResult, PSignalResult, ReturnValue, MaybeSerializedProcess};
+use crate::process::{BoxedProcess, Message, PResult, PSignalResult, ReturnValue, MaybeSerializedProcess};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Kernel {
@@ -40,7 +40,7 @@ impl Kernel {
         }
     }
 
-    pub fn run_next(&mut self, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) -> bool {
+    pub fn run_next(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) -> bool {
         if let Some(Task {ty, pid}) = self.scheduler.next() {
             // Grab ownership of the process and it's metadata
             if let Some(mut pinfo) = self.process_table.remove(&pid) {  // todo: gather mutations
@@ -70,7 +70,7 @@ impl Kernel {
         }
     }
 
-    pub fn launch_process(&mut self, proc: Box<dyn Process>, parent_pid: Option<u32>) -> u32 {
+    pub fn launch_process(&mut self, proc: BoxedProcess, parent_pid: Option<u32>) -> u32 {
         let pinfo = ProcessInfo::new(
             self.next_pid_number,
             parent_pid,
@@ -94,7 +94,11 @@ impl Kernel {
         }
     }
 
-    fn process_result(&mut self, proc_res: PResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) {
+    pub fn tick(&self) -> u32 {
+        self.current_tick
+    }
+
+    fn process_result(&mut self, proc_res: PResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) {
         match proc_res {
             PResult::Done(rv) => {
                 self.join_parent(&pinfo, rv);
@@ -120,7 +124,7 @@ impl Kernel {
         };
     }
 
-    fn process_signal_result(&mut self, proc_res: PSignalResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) {
+    fn process_signal_result(&mut self, proc_res: PSignalResult, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) {
         match proc_res {
             PSignalResult::None => {
                 self.process_table.insert(pinfo.pid, pinfo);
@@ -140,7 +144,7 @@ impl Kernel {
         };
     }
 
-    fn fork(&mut self, new_procs: Vec<Box<dyn Process>>, pinfo: &mut ProcessInfo) {
+    fn fork(&mut self, new_procs: Vec<BoxedProcess>, pinfo: &mut ProcessInfo) {
         for p in new_procs {
             pinfo.children_processes.insert(self.launch_process(p, Some(pinfo.pid)));
         }
@@ -155,7 +159,7 @@ impl Kernel {
         }
     }
 
-    fn terminate(&mut self, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &[u8]) -> Box<dyn Process>) {
+    fn terminate(&mut self, mut pinfo: ProcessInfo, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) {
         for cpid in pinfo.children_processes.iter() {
             if let Some(cpinfo) = self.process_table.remove(cpid) {
                 let process = pinfo.process.deserialized_process(deserializer);
