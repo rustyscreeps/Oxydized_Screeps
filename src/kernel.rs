@@ -160,7 +160,7 @@ impl Kernel {
         }
     }
 
-    fn join_parent(&mut self, pinfo: &ProcessInfo, rv: ReturnValue) {
+    fn join_parent(&mut self, pinfo: &ProcessInfo, rv: Option<ReturnValue>) {
         if let Some(parent_pid) = pinfo.parent_pid {
             if let Some(parent) = self.process_table.get_mut(&parent_pid) {
                 self.scheduler.join_process(parent_pid, rv);
@@ -205,7 +205,7 @@ impl ProcessInfo {
 pub enum TaskType {
     Start,
     Run,
-    Join(ReturnValue),
+    Join(Option<ReturnValue>),
     ReceiveMessage(Message),
 }
 
@@ -249,7 +249,7 @@ impl Scheduler {
         self.next_tick_tasks.push_back( Task { ty: TaskType::Run, pid});
     }
 
-    pub fn join_process(&mut self, parent_pid: u32, result: ReturnValue){
+    pub fn join_process(&mut self, parent_pid: u32, result: Option<ReturnValue>){
         self.schedule(parent_pid, TaskType::Join(result));
     }
 

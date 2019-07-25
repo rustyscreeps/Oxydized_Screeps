@@ -21,13 +21,16 @@ impl Process for ParentProcess {
         PResult::Fork(vec![cproc], PResult::YieldTick.into())
     }
 
-    fn join(&mut self, return_value: ReturnValue) -> PSignalResult {
-        let ReturnValue { value } = return_value;
-        if self.s {
-            PSignalResult::Done(ReturnValue::new(&format!("{}{}", self.h, value)))
-        } else {
-            PSignalResult::None
+    fn join(&mut self, return_value: Option<ReturnValue>) -> PSignalResult {
+        if let Some(ReturnValue { value }) = return_value {
+            if self.s {
+                return PSignalResult::Done(Some(ReturnValue::new(&format!(
+                    "{}{}",
+                    self.h, value
+                ))));
+            }
         }
+        PSignalResult::None
     }
 
     fn type_id(&self) -> u32 {
@@ -67,7 +70,7 @@ impl Process for ChildProcess {
 
     fn run(&mut self) -> PResult {
         self.n_run += 1;
-        PResult::Done(ReturnValue::new(&self.w))
+        PResult::Done(Some(ReturnValue::new(&self.w)))
     }
 
     fn type_id(&self) -> u32 {

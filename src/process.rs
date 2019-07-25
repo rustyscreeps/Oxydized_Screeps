@@ -6,7 +6,7 @@ use std::fmt;
 
 // use erased_serde::{self, serialize_trait_object, __internal_serialize_trait_object};
 // use serde;
-use serde::{Serialize, Deserialize, Serializer, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub type BoxedProcess = Box<dyn Process + Sync + Send>;
 
@@ -18,7 +18,7 @@ pub trait Process {
     fn run(&mut self) -> PResult;
 
     #[allow(unused_variables)]
-    fn join(&mut self, return_value: ReturnValue) -> PSignalResult{
+    fn join(&mut self, return_value: Option<ReturnValue>) -> PSignalResult {
         PSignalResult::None
     }
 
@@ -37,7 +37,7 @@ pub trait Process {
 // serialize_trait_object!(Process);
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Message ();
+pub struct Message();
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ReturnValue {
@@ -47,14 +47,14 @@ pub struct ReturnValue {
 impl ReturnValue {
     pub fn new(value: &str) -> Self {
         ReturnValue {
-            value: value.to_owned()
+            value: value.to_owned(),
         }
     }
 }
 
 pub enum PResult {
     // Todo: Maybe add a way to track state (u8) which could be matched on as entry points
-    Done(ReturnValue),
+    Done(Option<ReturnValue>),
     Yield,
     YieldTick,
     Sleep(u32),
@@ -64,7 +64,7 @@ pub enum PResult {
 }
 
 pub enum PSignalResult {
-    Done(ReturnValue), // Short-circuit the `run` method
+    Done(Option<ReturnValue>), // Short-circuit the `run` method
     Fork(Vec<BoxedProcess>, Box<Self>),
     Error(String),
     None, // Do nothing.
@@ -83,7 +83,6 @@ pub enum MaybeSerializedProcess {
 }
 
 impl MaybeSerializedProcess {
-
     // Still unclear whether you'd ever want to go from De to Ser
 
     // pub fn serialize(&mut self) {
@@ -105,22 +104,25 @@ impl MaybeSerializedProcess {
     //     }
     // }
 
-    pub fn deserialize(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess){
+    pub fn deserialize(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) {
         match self {
             MaybeSerializedProcess::Ser(sp) => {
                 let process = deserializer(sp.type_id, &sp.bytes);
                 *self = MaybeSerializedProcess::De(process);
-            },
+            }
             MaybeSerializedProcess::De(_) => (),
         }
     }
 
     #[allow(clippy::borrowed_box)]
-    pub fn deserialized_process(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) -> &mut BoxedProcess {
+    pub fn deserialized_process(
+        &mut self,
+        deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess,
+    ) -> &mut BoxedProcess {
         self.deserialize(deserializer);
         match self {
             MaybeSerializedProcess::De(process) => process,
-            _ => panic!("Deserialization of a process failed!")
+            _ => panic!("Deserialization of a process failed!"),
         }
     }
 }
@@ -132,12 +134,11 @@ impl Serialize for MaybeSerializedProcess {
     {
         match self {
             MaybeSerializedProcess::Ser(sp) => sp.serialize(serializer),
-            MaybeSerializedProcess::De(obj) => {
-                SerializedProcess {
-                    type_id: obj.type_id(),
-                    bytes: obj.to_bytes(),
-                }.serialize(serializer)
+            MaybeSerializedProcess::De(obj) => SerializedProcess {
+                type_id: obj.type_id(),
+                bytes: obj.to_bytes(),
             }
+            .serialize(serializer),
         }
     }
 }
@@ -145,9 +146,9 @@ impl Serialize for MaybeSerializedProcess {
 impl<'de> Deserialize<'de> for MaybeSerializedProcess {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de> {
-        SerializedProcess::deserialize(deserializer)
-            .map(MaybeSerializedProcess::Ser)
+        D: Deserializer<'de>,
+    {
+        SerializedProcess::deserialize(deserializer).map(MaybeSerializedProcess::Ser)
     }
 }
 
