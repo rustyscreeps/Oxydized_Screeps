@@ -1,8 +1,7 @@
-use oxidized_screeps::*;
+use oxydized_screeps::*;
 
 use bincode;
 use serde::{Deserialize, Serialize};
-
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ParentProcess {
@@ -13,17 +12,17 @@ struct ParentProcess {
 impl Process for ParentProcess {
     fn start(&mut self) -> PResult {
         let cproc = Box::new(ChildProcess::new());
-        PResult::Fork(vec![cproc], PResult::Yield.into())
+        PResult::Fork(vec![cproc], PResult::YieldTick.into())
     }
 
     fn run(&mut self) -> PResult {
         self.s = true;
         let cproc = Box::new(ChildProcess::new());
-        PResult::Fork(vec![cproc], PResult::Yield.into())
+        PResult::Fork(vec![cproc], PResult::YieldTick.into())
     }
 
-    fn join(&mut self, return_value: ReturnValue) -> PSignalResult{
-        let ReturnValue{ value } = return_value;
+    fn join(&mut self, return_value: ReturnValue) -> PSignalResult {
+        let ReturnValue { value } = return_value;
         if self.s {
             PSignalResult::Done(ReturnValue::new(&format!("{}{}", self.h, value)))
         } else {
@@ -60,7 +59,7 @@ struct ChildProcess {
     n_run: u32,
 }
 
-    impl Process for ChildProcess {
+impl Process for ChildProcess {
     fn start(&mut self) -> PResult {
         self.s = true;
         PResult::Sleep(3)
@@ -94,14 +93,13 @@ impl ChildProcess {
     }
 }
 
-fn deserialize_process(type_id: u32, bytes: &[u8]) -> Box<dyn Process> {
+fn deserialize_process(type_id: u32, bytes: &[u8]) -> BoxedProcess {
     match type_id {
         1 => Box::new(ParentProcess::from_bytes(bytes)),
         2 => Box::new(ChildProcess::from_bytes(bytes)),
         _ => panic!("bad process number"),
     }
 }
-
 
 #[test]
 fn empty_kernel() {
