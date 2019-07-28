@@ -193,11 +193,11 @@ impl Kernel {
     ) {
         for cpid in pinfo.children_processes.iter() {
             if let Some(cpinfo) = self.process_table.remove(cpid) {
-                let process = pinfo.process.deserialized_process(deserializer);
-                process.kill();
                 self.terminate(cpinfo, deserializer);
             }
         }
+        let process = pinfo.process.deserialized_process(deserializer);
+        process.kill();
     }
 }
 
