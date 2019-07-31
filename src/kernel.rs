@@ -8,7 +8,7 @@
 // - Remove most of the `pub`
 // - Better killing of processes.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use log::error;
 use serde::{Deserialize, Serialize};
@@ -19,23 +19,23 @@ use crate::process::{
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Kernel {
-    process_table: BTreeMap<u32, MaybeSerializedProcess>,
-    info_table: BTreeMap<u32, ProcessInfo>,
+    process_table: HashMap<u32, MaybeSerializedProcess>,
+    info_table: HashMap<u32, ProcessInfo>,
     next_pid_number: u32,
     scheduler: Scheduler,
     current_tick: u32,
-    wake_list: BTreeMap<u32, Vec<u32>>,
+    wake_list: HashMap<u32, Vec<u32>>,
 }
 
 impl Kernel {
     pub fn new(current_tick: u32) -> Self {
         Kernel {
-            process_table: BTreeMap::default(),
-            info_table: BTreeMap::default(),
+            process_table: HashMap::default(),
+            info_table: HashMap::default(),
             next_pid_number: 0,
             scheduler: Scheduler::new(),
             current_tick,
-            wake_list: BTreeMap::default(),
+            wake_list: HashMap::default(),
         }
     }
 
@@ -206,7 +206,7 @@ impl Kernel {
 pub struct ProcessInfo {
     pid: u32,
     parent_pid: Option<u32>,
-    children_processes: BTreeSet<u32>,
+    children_processes: HashSet<u32>,
     process_type_id: u32,
 }
 
@@ -215,7 +215,7 @@ impl ProcessInfo {
         ProcessInfo {
             pid,
             parent_pid,
-            children_processes: BTreeSet::new(),
+            children_processes: HashSet::new(),
             process_type_id,
         }
     }
