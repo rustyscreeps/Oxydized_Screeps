@@ -13,6 +13,7 @@ use crate::kernel::OS;
 pub type BoxedProcess = Box<dyn Process + Sync + Send>;
 
 pub trait Process {
+    #[allow(unused_variables)]
     fn start(&mut self, os: OS) -> PResult {
         PResult::Yield
     }
@@ -61,13 +62,11 @@ pub enum PResult {
     YieldTick,
     Sleep(u32),
     Wait,
-    Fork(Vec<BoxedProcess>, Box<Self>),
     Error(String),
 }
 
 pub enum PSignalResult {
     Done(Option<ReturnValue>), // Short-circuit the `run` method
-    Fork(Vec<BoxedProcess>, Box<Self>),
     Error(String),
     None, // Do nothing.
 }

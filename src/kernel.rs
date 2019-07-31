@@ -129,10 +129,8 @@ impl Kernel {
                     .push(pid);
                 self.process_table.insert(pid, process);
             }
-            PResult::Wait => {}
-            PResult::Fork(procs, proc_result) => {
-                self.fork(procs, pid);
-                self.process_result(process, *proc_result, pid, deserializer);
+            PResult::Wait => {
+                self.process_table.insert(pid, process);
             }
             PResult::Error(s) => {
                 let pinfo = self.info_table.get(&pid).unwrap();
@@ -159,10 +157,6 @@ impl Kernel {
             PSignalResult::Done(rv) => {
                 self.join_parent(pid, rv);
                 self.terminate(pid, deserializer);
-            }
-            PSignalResult::Fork(procs, proc_result) => {
-                self.fork(procs, pid);
-                self.process_signal_result(process, *proc_result, pid, deserializer);
             }
             PSignalResult::Error(s) => {
                 let pinfo = self.info_table.get(&pid).unwrap();
