@@ -8,25 +8,25 @@ use std::fmt;
 // use serde;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::kernel::OS;
+use crate::kernel::SysCall;
 
 pub type BoxedProcess = Box<dyn Process + Sync + Send>;
 
 pub trait Process {
     #[allow(unused_variables)]
-    fn start(&mut self, os: OS) -> PResult {
+    fn start(&mut self, syscall: SysCall) -> PResult {
         PResult::Yield
     }
 
-    fn run(&mut self, os: OS) -> PResult;
+    fn run(&mut self, syscall: SysCall) -> PResult;
 
     #[allow(unused_variables)]
-    fn join(&mut self, os: OS, return_value: Option<ReturnValue>) -> PSignalResult {
+    fn join(&mut self, syscall: SysCall, return_value: Option<ReturnValue>) -> PSignalResult {
         PSignalResult::None
     }
 
     #[allow(unused_variables)]
-    fn receive(&mut self, os: OS, msg: Message) -> PSignalResult {
+    fn receive(&mut self, syscall: SysCall, msg: Message) -> PSignalResult {
         PSignalResult::None
     }
 

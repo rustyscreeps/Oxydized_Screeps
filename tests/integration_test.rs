@@ -10,7 +10,7 @@ struct ParentProcess {
 }
 
 impl Process for ParentProcess {
-    fn start(&mut self) -> PResult {
+    fn start(&mut self, _: OS) -> PResult {
         let cproc = Box::new(ChildProcess::new());
         PResult::Fork(vec![cproc], PResult::YieldTick.into())
     }

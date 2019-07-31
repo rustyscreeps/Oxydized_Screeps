@@ -42,24 +42,24 @@ impl Kernel {
     pub fn run_next(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) -> bool {
         if let Some(Task { ty, pid }) = self.scheduler.next() {
             if let Some(mut ser_proc) = self.process_table.remove(&pid) {
-                let os = OS::new(self, pid);
+                let sc = SysCall::new(self, pid);
                 let process = ser_proc.deserialized_process(deserializer);
 
                 match ty {
                     TaskType::Start => {
-                        let pr = process.start(os);
+                        let pr = process.start(sc);
                         self.process_result(ser_proc, pr, pid, deserializer);
                     }
                     TaskType::Run => {
-                        let pr = process.run(os);
+                        let pr = process.run(sc);
                         self.process_result(ser_proc, pr, pid, deserializer);
                     }
                     TaskType::Join(result) => {
-                        let pr = process.join(os, result);
+                        let pr = process.join(sc, result);
                         self.process_signal_result(ser_proc, pr, pid, deserializer);
                     }
                     TaskType::ReceiveMessage(msg) => {
-                        let pr = process.receive(os, msg);
+                        let pr = process.receive(sc, msg);
                         self.process_signal_result(ser_proc, pr, pid, deserializer);
                     }
                 };
@@ -291,19 +291,27 @@ impl Scheduler {
 }
 
 #[derive(Debug)]
-pub struct OS<'a> {
+pub struct SysCall<'a> {
     // This deliberately do not implement Serialize to avoid processes
     // keeping a reference to it.
     ker: &'a mut Kernel,
     user_pid: u32,
 }
 
-impl OS<'_> {
-    pub(crate) fn new(ker: &mut Kernel, user_pid: u32) -> OS {
-        OS { ker, user_pid }
+impl SysCall<'_> {
+    pub(crate) fn new(ker: &mut Kernel, user_pid: u32) -> SysCall {
+        SysCall { ker, user_pid }
     }
 
     pub fn fork(&mut self, processes: Vec<BoxedProcess>) -> Vec<u32> {
         self.ker.fork(processes, self.user_pid)
+    }
+
+    pub fn send_message(&mut self, recipient_pid: u32, msg: Message) {
+        self.ker.scheduler.send_message(recipient_pid, msg);
+    }
+
+    pub fn my_pid(&self) -> u32 {
+        self.user_pid
     }
 }
