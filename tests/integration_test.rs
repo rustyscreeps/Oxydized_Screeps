@@ -1,3 +1,4 @@
+use oxydized_screeps::kernel::SysCall;
 use oxydized_screeps::*;
 
 use bincode;
@@ -10,18 +11,20 @@ struct ParentProcess {
 }
 
 impl Process for ParentProcess {
-    fn start(&mut self, _: OS) -> PResult {
+    fn start(&mut self, mut sc: SysCall) -> PResult {
         let cproc = Box::new(ChildProcess::new());
-        PResult::Fork(vec![cproc], PResult::YieldTick.into())
+        sc.fork(vec![cproc]);
+        PResult::YieldTick
     }
 
-    fn run(&mut self) -> PResult {
+    fn run(&mut self, mut sc: SysCall) -> PResult {
         self.s = true;
         let cproc = Box::new(ChildProcess::new());
-        PResult::Fork(vec![cproc], PResult::YieldTick.into())
+        sc.fork(vec![cproc]);
+        PResult::YieldTick
     }
 
-    fn join(&mut self, return_value: Option<ReturnValue>) -> PSignalResult {
+    fn join(&mut self, _: SysCall, return_value: Option<ReturnValue>) -> PSignalResult {
         if let Some(ReturnValue { value }) = return_value {
             if self.s {
                 return PSignalResult::Done(Some(ReturnValue::new(&format!(
@@ -63,12 +66,12 @@ struct ChildProcess {
 }
 
 impl Process for ChildProcess {
-    fn start(&mut self) -> PResult {
+    fn start(&mut self, _: SysCall) -> PResult {
         self.s = true;
         PResult::Sleep(3)
     }
 
-    fn run(&mut self) -> PResult {
+    fn run(&mut self, _: SysCall) -> PResult {
         self.n_run += 1;
         PResult::Done(Some(ReturnValue::new(&self.w)))
     }
