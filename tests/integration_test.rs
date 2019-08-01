@@ -12,14 +12,15 @@ struct ParentProcess {
 
 impl Process for ParentProcess {
     type Content = ();
+    type Return = String;
 
-    fn start(&mut self, mut sc: SysCall<Self::Content>) -> PResult {
+    fn start(&mut self, mut sc: SysCall<Self::Content, Self::Return>) -> PResult<Self::Return> {
         let cproc = Box::new(ChildProcess::new());
         sc.fork(vec![cproc]);
         PResult::YieldTick
     }
 
-    fn run(&mut self, mut sc: SysCall<Self::Content>) -> PResult {
+    fn run(&mut self, mut sc: SysCall<Self::Content, Self::Return>) -> PResult<Self::Return> {
         self.s = true;
         let cproc = Box::new(ChildProcess::new());
         sc.fork(vec![cproc]);
@@ -28,15 +29,12 @@ impl Process for ParentProcess {
 
     fn join(
         &mut self,
-        _: SysCall<Self::Content>,
-        return_value: Option<ReturnValue>,
-    ) -> PSignalResult {
-        if let Some(ReturnValue { value }) = return_value {
+        _: SysCall<Self::Content, Self::Return>,
+        return_value: Option<Self::Return>,
+    ) -> PSignalResult<Self::Return> {
+        if let Some(value) = return_value {
             if self.s {
-                return PSignalResult::Done(Some(ReturnValue::new(&format!(
-                    "{}{}",
-                    self.h, value
-                ))));
+                return PSignalResult::Done(Some(format!("{}{}", self.h, value)));
             }
         }
         PSignalResult::None
@@ -73,15 +71,16 @@ struct ChildProcess {
 
 impl Process for ChildProcess {
     type Content = ();
+    type Return = String;
 
-    fn start(&mut self, _: SysCall<Self::Content>) -> PResult {
+    fn start(&mut self, _: SysCall<Self::Content, Self::Return>) -> PResult<Self::Return> {
         self.s = true;
         PResult::Sleep(3)
     }
 
-    fn run(&mut self, _: SysCall<Self::Content>) -> PResult {
+    fn run(&mut self, _: SysCall<Self::Content, Self::Return>) -> PResult<Self::Return> {
         self.n_run += 1;
-        PResult::Done(Some(ReturnValue::new(&self.w)))
+        PResult::Done(Some(self.w.clone()))
     }
 
     fn type_id(&self) -> u32 {
@@ -107,7 +106,7 @@ impl ChildProcess {
     }
 }
 
-fn deserialize_process(type_id: u32, bytes: &[u8]) -> BoxedProcess<()> {
+fn deserialize_process(type_id: u32, bytes: &[u8]) -> BoxedProcess<(), String> {
     match type_id {
         1 => Box::new(ParentProcess::from_bytes(bytes)),
         2 => Box::new(ChildProcess::from_bytes(bytes)),
@@ -117,21 +116,21 @@ fn deserialize_process(type_id: u32, bytes: &[u8]) -> BoxedProcess<()> {
 
 #[test]
 fn empty_kernel() {
-    let mut ker = Kernel::<()>::new(10);
+    let mut ker = Kernel::<(), String>::new(10);
 
     for _ in 0..10 {
         ker.run_next(&deserialize_process);
     }
 
     let s = bincode::serialize(&ker).unwrap();
-    let mut de_ker: Kernel<()> = bincode::deserialize(&s).unwrap();
+    let mut de_ker: Kernel<(), String> = bincode::deserialize(&s).unwrap();
 
     de_ker.next_tick();
 }
 
 #[test]
 fn lauch_single_process() {
-    let mut ker = Kernel::<()>::new(10);
+    let mut ker = Kernel::<(), String>::new(10);
 
     ker.launch_process(Box::new(ChildProcess::new()), None);
 
@@ -140,14 +139,14 @@ fn lauch_single_process() {
     }
 
     let s = bincode::serialize(&ker).unwrap();
-    let mut de_ker: Kernel<()> = bincode::deserialize(&s).unwrap();
+    let mut de_ker: Kernel<(), String> = bincode::deserialize(&s).unwrap();
 
     de_ker.next_tick();
 }
 
 #[test]
 fn lauch_child_process() {
-    let mut ker = Kernel::<()>::new(10);
+    let mut ker = Kernel::<(), String>::new(10);
     ker.launch_process(Box::new(ParentProcess::new()), None);
 
     for _ in 0..10 {

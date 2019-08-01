@@ -3,7 +3,7 @@ pub mod process;
 
 pub use crate::{
     kernel::Kernel,
-    process::{BoxedProcess, PResult, PSignalResult, Process, ReturnValue},
+    process::{BoxedProcess, PResult, PSignalResult, Process},
 };
 
 #[cfg(test)]
