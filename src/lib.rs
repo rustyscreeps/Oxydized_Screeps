@@ -2,12 +2,9 @@ pub mod kernel;
 pub mod process;
 
 pub use crate::{
-    kernel::{Kernel},
-    process::{Process, PResult, PSignalResult, ReturnValue, Message, BoxedProcess},
+    kernel::Kernel,
+    process::{BoxedProcess, PResult, PSignalResult, Process, ReturnValue},
 };
 
-
 #[cfg(test)]
-mod tests {
-
-}
+mod tests {}

@@ -10,23 +10,25 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::kernel::SysCall;
 
-pub type BoxedProcess = Box<dyn Process + Sync + Send>;
+pub type BoxedProcess<T> = Box<dyn Process<Content=T> + Sync + Send>;
 
 pub trait Process {
+    type Content;
+
     #[allow(unused_variables)]
-    fn start(&mut self, syscall: SysCall) -> PResult {
+    fn start(&mut self, syscall: SysCall<Self::Content>) -> PResult {
         PResult::Yield
     }
 
-    fn run(&mut self, syscall: SysCall) -> PResult;
+    fn run(&mut self, syscall: SysCall<Self::Content>) -> PResult;
 
     #[allow(unused_variables)]
-    fn join(&mut self, syscall: SysCall, return_value: Option<ReturnValue>) -> PSignalResult {
+    fn join(&mut self, syscall: SysCall<Self::Content>, return_value: Option<ReturnValue>) -> PSignalResult {
         PSignalResult::None
     }
 
     #[allow(unused_variables)]
-    fn receive(&mut self, syscall: SysCall, msg: Message) -> PSignalResult {
+    fn receive(&mut self, syscall: SysCall<Self::Content>, msg: Message<Self::Content>) -> PSignalResult {
         PSignalResult::None
     }
 
@@ -37,14 +39,15 @@ pub trait Process {
     fn to_bytes(&self) -> Vec<u8>;
 }
 
-// serialize_trait_object!(Process);
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Message();
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ReturnValue {
     pub value: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Message<T> {
+    sender_pid: u32,
+    msg: T,
 }
 
 impl ReturnValue {
@@ -78,12 +81,12 @@ pub struct SerializedProcess {
 }
 
 #[derive(Debug)]
-pub enum MaybeSerializedProcess {
+pub enum MaybeSerializedProcess<T> {
     Ser(SerializedProcess),
-    De(BoxedProcess),
+    De(BoxedProcess<T>),
 }
 
-impl MaybeSerializedProcess {
+impl<T> MaybeSerializedProcess<T> {
     // Still unclear whether you'd ever want to go from De to Ser
 
     // pub fn serialize(&mut self) {
@@ -105,7 +108,7 @@ impl MaybeSerializedProcess {
     //     }
     // }
 
-    pub fn deserialize(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) {
+    pub fn deserialize(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess<T>) {
         match self {
             MaybeSerializedProcess::Ser(sp) => {
                 let process = deserializer(sp.type_id, &sp.bytes);
@@ -118,8 +121,8 @@ impl MaybeSerializedProcess {
     #[allow(clippy::borrowed_box)]
     pub fn deserialized_process(
         &mut self,
-        deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess,
-    ) -> &mut BoxedProcess {
+        deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess<T>,
+    ) -> &mut BoxedProcess<T> {
         self.deserialize(deserializer);
         match self {
             MaybeSerializedProcess::De(process) => process,
@@ -128,7 +131,7 @@ impl MaybeSerializedProcess {
     }
 }
 
-impl Serialize for MaybeSerializedProcess {
+impl<T> Serialize for MaybeSerializedProcess<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -144,7 +147,7 @@ impl Serialize for MaybeSerializedProcess {
     }
 }
 
-impl<'de> Deserialize<'de> for MaybeSerializedProcess {
+impl<'de, T> Deserialize<'de> for MaybeSerializedProcess<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -168,7 +171,7 @@ impl<'de> Deserialize<'de> for MaybeSerializedProcess {
 //     }
 // }
 
-impl fmt::Debug for BoxedProcess {
+impl<T> fmt::Debug for BoxedProcess<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Process {{ type: {} }}", self.type_id())
     }

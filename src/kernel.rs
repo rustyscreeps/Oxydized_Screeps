@@ -18,28 +18,28 @@ use crate::process::{
 };
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Kernel {
-    process_table: HashMap<u32, MaybeSerializedProcess>,
+pub struct Kernel<T> {
+    process_table: HashMap<u32, MaybeSerializedProcess<T>>,
     info_table: HashMap<u32, ProcessInfo>,
     next_pid_number: u32,
-    scheduler: Scheduler,
+    scheduler: Scheduler<T>,
     current_tick: u32,
     wake_list: HashMap<u32, Vec<u32>>,
 }
 
-impl Kernel {
+impl<T> Kernel<T> {
     pub fn new(current_tick: u32) -> Self {
         Kernel {
-            process_table: HashMap::default(),
-            info_table: HashMap::default(),
+            process_table: HashMap::new(),
+            info_table: HashMap::new(),
             next_pid_number: 0,
             scheduler: Scheduler::new(),
             current_tick,
-            wake_list: HashMap::default(),
+            wake_list: HashMap::new(),
         }
     }
 
-    pub fn run_next(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) -> bool {
+    pub fn run_next(&mut self, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess<T>) -> bool {
         if let Some(Task { ty, pid }) = self.scheduler.next() {
             if let Some(mut ser_proc) = self.process_table.remove(&pid) {
                 let sc = SysCall::new(self, pid);
@@ -71,7 +71,7 @@ impl Kernel {
         }
     }
 
-    pub fn launch_process(&mut self, proc: BoxedProcess, parent_pid: Option<u32>) -> u32 {
+    pub fn launch_process(&mut self, proc: BoxedProcess<T>, parent_pid: Option<u32>) -> u32 {
         let pinfo = ProcessInfo::new(self.next_pid_number, parent_pid, proc.type_id());
         self.info_table.insert(self.next_pid_number, pinfo); // todo:  Make this more robust.
 
@@ -104,10 +104,10 @@ impl Kernel {
 
     fn process_result(
         &mut self,
-        process: MaybeSerializedProcess,
+        process: MaybeSerializedProcess<T>,
         proc_res: PResult,
         pid: u32,
-        deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess,
+        deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess<T>,
     ) {
         match proc_res {
             PResult::Done(rv) => {
@@ -145,10 +145,10 @@ impl Kernel {
 
     fn process_signal_result(
         &mut self,
-        process: MaybeSerializedProcess,
+        process: MaybeSerializedProcess<T>,
         proc_res: PSignalResult,
         pid: u32,
-        deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess,
+        deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess<T>,
     ) {
         match proc_res {
             PSignalResult::None => {
@@ -166,7 +166,7 @@ impl Kernel {
         };
     }
 
-    pub(crate) fn fork(&mut self, new_procs: Vec<BoxedProcess>, pid: u32) -> Vec<u32> {
+    pub(crate) fn fork(&mut self, new_procs: Vec<BoxedProcess<T>>, pid: u32) -> Vec<u32> {
         let mut cpids = Vec::new();
         for p in new_procs {
             let cpid = self.launch_process(p, Some(pid));
@@ -190,7 +190,7 @@ impl Kernel {
         }
     }
 
-    fn terminate(&mut self, pid: u32, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess) {
+    fn terminate(&mut self, pid: u32, deserializer: &impl Fn(u32, &[u8]) -> BoxedProcess<T>) {
         if let Some(pinfo) = self.info_table.remove(&pid) {
             for cpid in pinfo.children_processes.iter() {
                 self.terminate(*cpid, deserializer);
@@ -222,38 +222,47 @@ impl ProcessInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum TaskType {
+pub enum TaskType<T> {
     Start,
     Run,
     Join(Option<ReturnValue>),
-    ReceiveMessage(Message),
+    ReceiveMessage(Message<T>),
 }
 
-impl Default for TaskType {
+impl<T> Default for TaskType<T> {
     fn default() -> Self {
         TaskType::Start
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct Task {
-    ty: TaskType,
+pub struct Task<T> {
+    ty: TaskType<T>,
     pid: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
-pub struct Scheduler {
-    task_queue: VecDeque<Task>,
-    next_tick_tasks: VecDeque<Task>,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Scheduler<T> {
+    task_queue: VecDeque<Task<T>>,
+    next_tick_tasks: VecDeque<Task<T>>,
 }
 
-impl Scheduler {
+impl<T> Default for Scheduler<T> {
+    fn default() -> Self {
+        Scheduler {
+            task_queue: VecDeque::default(),
+            next_tick_tasks: VecDeque::default(),
+        }
+    }
+}
+
+impl<T> Scheduler<T> {
     pub fn new() -> Self {
         Self::default()
     }
 
     #[allow(clippy::should_implement_trait)] // Implement iter?
-    pub fn next(&mut self) -> Option<Task> {
+    pub fn next(&mut self) -> Option<Task<T>> {
         self.task_queue.pop_front()
     }
 
@@ -276,7 +285,7 @@ impl Scheduler {
         self.schedule(parent_pid, TaskType::Join(result));
     }
 
-    pub fn send_message(&mut self, receiver_pid: u32, msg: Message) {
+    pub fn send_message(&mut self, receiver_pid: u32, msg: Message<T>) {
         self.schedule(receiver_pid, TaskType::ReceiveMessage(msg))
     }
 
@@ -284,30 +293,30 @@ impl Scheduler {
         self.task_queue.append(&mut self.next_tick_tasks);
     }
 
-    fn schedule(&mut self, pid: u32, ty: TaskType) {
+    fn schedule(&mut self, pid: u32, ty: TaskType<T>) {
         // Todo: Might want to check whether the process has already been scheduled?
         self.task_queue.push_back(Task { ty, pid });
     }
 }
 
 #[derive(Debug)]
-pub struct SysCall<'a> {
+pub struct SysCall<'a, T> {
     // This deliberately do not implement Serialize to avoid processes
     // keeping a reference to it.
-    ker: &'a mut Kernel,
+    ker: &'a mut Kernel<T>,
     user_pid: u32,
 }
 
-impl SysCall<'_> {
-    pub(crate) fn new(ker: &mut Kernel, user_pid: u32) -> SysCall {
+impl<T> SysCall<'_, T> {
+    pub(crate) fn new(ker: &mut Kernel<T>, user_pid: u32) -> SysCall<T> {
         SysCall { ker, user_pid }
     }
 
-    pub fn fork(&mut self, processes: Vec<BoxedProcess>) -> Vec<u32> {
+    pub fn fork(&mut self, processes: Vec<BoxedProcess<T>>) -> Vec<u32> {
         self.ker.fork(processes, self.user_pid)
     }
 
-    pub fn send_message(&mut self, recipient_pid: u32, msg: Message) {
+    pub fn send_message(&mut self, recipient_pid: u32, msg: Message<T>) {
         self.ker.scheduler.send_message(recipient_pid, msg);
     }
 
