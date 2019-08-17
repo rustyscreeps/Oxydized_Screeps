@@ -13,9 +13,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use log::error;
 use serde::{Deserialize, Serialize};
 
-use crate::process::{
-    BoxedProcess, MaybeSerializedProcess, Message, PResult, PSignalResult,
-};
+use crate::process::{BoxedProcess, MaybeSerializedProcess, Message, PResult, PSignalResult};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Kernel<M, R> {
@@ -203,7 +201,7 @@ impl<M, R> Kernel<M, R> {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ProcessInfo {
+struct ProcessInfo {
     pid: u32,
     parent_pid: Option<u32>,
     children_processes: HashSet<u32>,
@@ -222,7 +220,7 @@ impl ProcessInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum TaskType<M, R> {
+enum TaskType<M, R> {
     Start,
     Run,
     Join(Option<R>),
@@ -236,13 +234,13 @@ impl<M, R> Default for TaskType<M, R> {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Task<M, R> {
+struct Task<M, R> {
     ty: TaskType<M, R>,
     pid: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Scheduler<M, R> {
+struct Scheduler<M, R> {
     task_queue: VecDeque<Task<M, R>>,
     next_tick_tasks: VecDeque<Task<M, R>>,
 }
