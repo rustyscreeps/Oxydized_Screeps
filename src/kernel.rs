@@ -164,7 +164,7 @@ impl<M, R> Kernel<M, R> {
         };
     }
 
-    pub(crate) fn fork(&mut self, new_procs: Vec<BoxedProcess<M, R>>, pid: u32) -> Vec<u32> {
+    pub(crate) fn fork_multi(&mut self, new_procs: Vec<BoxedProcess<M, R>>, pid: u32) -> Vec<u32> {
         let mut cpids = Vec::new();
         for p in new_procs {
             let cpid = self.launch_process(p, Some(pid));
@@ -175,6 +175,15 @@ impl<M, R> Kernel<M, R> {
         pinfo.children_processes.extend(cpids.iter());
 
         cpids
+    }
+
+    pub(crate) fn fork(&mut self, new_proc: BoxedProcess<M, R>, pid: u32) -> u32 {
+        let cpid = self.launch_process(new_proc, Some(pid));
+
+        let pinfo = self.info_table.get_mut(&pid).unwrap();
+        pinfo.children_processes.insert(cpid);
+
+        cpid
     }
 
     pub(crate) fn join_parent(&mut self, pid: u32, rv: Option<R>) {
@@ -310,8 +319,12 @@ impl<M, R> SysCall<'_, M, R> {
         SysCall { ker, user_pid }
     }
 
-    pub fn fork(&mut self, processes: Vec<BoxedProcess<M, R>>) -> Vec<u32> {
-        self.ker.fork(processes, self.user_pid)
+    pub fn fork_vec(&mut self, processes: Vec<BoxedProcess<M, R>>) -> Vec<u32> {
+        self.ker.fork_multi(processes, self.user_pid)
+    }
+
+    pub fn fork(&mut self, process: BoxedProcess<M, R>) -> u32 {
+        self.ker.fork(process, self.user_pid)
     }
 
     pub fn send_message(&mut self, recipient_pid: u32, msg: Message<M>) {
